@@ -1,5 +1,6 @@
 import typing
 from dataclasses import dataclass
+from collections import defaultdict
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class RestaurantManager:
         already defined a staff dictionary.
         """
         self.staff = {}
+        self.order_count = defaultdict(int)
 
     async def __call__(self, request: Request):
         """Handle a request received.
@@ -31,4 +33,24 @@ class RestaurantManager:
             Request object containing information about the sent
             request to your application.
         """
-        ...
+        match request.scope["type"]:
+            case "staff.onduty":
+                self.staff[request.scope["id"]] = request
+
+            case "staff.offduty":
+                del self.staff[request.scope["id"]]
+
+            case "order":
+                available_staff = [
+                    (member, self.order_count[member.scope["id"]])
+                    for member in self.staff.values()
+                    if request.scope["speciality"] in member.scope["speciality"]
+                ]
+                bored_staff = min(available_staff, key=lambda x: x[1])[0]
+
+                full_order = await request.receive()
+                await bored_staff.send(full_order)
+                self.order_count[bored_staff.scope["id"]] += 1
+
+                result = await bored_staff.receive()
+                await request.send(result)
